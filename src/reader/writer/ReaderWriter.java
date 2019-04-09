@@ -5,78 +5,107 @@
  */
 package reader.writer;
 import java.util.concurrent.*;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
 /**
  *
  * @author user
  */
 public class ReaderWriter {
-    private static Account account = new Account();
     /**
      * @param args the command line arguments
      */
     public static void main(String[] args) {
         ExecutorService executor = Executors.newCachedThreadPool();
+        Account account = new Account();
         
-        //create and launch 100 threads
-        for(int i = 0; i < 5; i++){
-            executor.execute(new AddAPennyTask());
+         for(int i = 0; i < 5; i++){
+            executor.execute(new AddAPennyTask(account));
         }
         
         for(int i = 0; i < 5; i++){
-            executor.execute(new RemoveAPennyTask());
+            executor.execute(new RemoveAPennyTask(account));
         }
         executor.shutdown();
-        
-        //wait until all tasks are finished
-        while(!executor.isTerminated()){
-        }
-        
+
+        while (!executor.isTerminated()) {}
+
         System.out.println("what is balance? " + account.getBalance());
     }
-    
-    private static class AddAPennyTask implements Runnable {
-        public void run(){
-            account.deposit(2000);
-        }
+}
+
+class AddAPennyTask implements Runnable {
+    private Account account;
+
+    public AddAPennyTask(Account account) {
+        this.account = account;
     }
-    
-    private static class RemoveAPennyTask implements Runnable {
-        public void run(){
-            account.withdraw(1000);
-        }
+
+    public void run(){
+        account.deposit(2000);
     }
-    
-    private static class Account {
-        private int balance = 0;
-        
-        public int getBalance(){
-            return balance;
-        }
-        
-        public void deposit(int amount){
-            int newBalance = amount + balance;
-            
-            //delay deliberately added to magnify the data-corruption and make it easy to see
-            try{
-                Thread.sleep(5);
-            }
-            catch (InterruptedException ex){
-            }
-            
+}
+
+class RemoveAPennyTask implements Runnable {
+    private Account account;
+
+    public RemoveAPennyTask(Account account) {
+        this.account = account;
+    }
+
+    public void run(){
+        account.withdraw(1000);
+    }
+}
+
+class Account {
+    private int balance = 0;
+    private Lock balanceLock = new ReentrantLock();
+
+    public int getBalance(){
+        return balance;
+    }
+
+    private int getBalanceInternally() {
+        balanceLock.lock();
+        return balance;
+    }
+
+    private void overwriteBalance(int newBalance) {
+        try {
             balance = newBalance;
         }
-        
-        public void withdraw(int amount){
-            int newBalance = balance - amount;
-            
-            //delay deliberately added to magnify the data-corruption and make it easy to see
-            try{
-                Thread.sleep(5);
-            }
-            catch (InterruptedException ex){
-            }
-            
-            balance = newBalance;
+        finally {
+            System.out.println("balance mutated to " + this.getBalance());
+            balanceLock.unlock();
+        }
+    }
+
+    public void deposit(int amount){
+        try {
+            int newBalance = amount + this.getBalanceInternally();
+
+            // delay deliberately added to magnify the data-corruption and make it easy to see
+            Thread.sleep(5);
+
+            this.overwriteBalance(newBalance);
+        }
+        catch (InterruptedException exception) {
+            exception.printStackTrace();
+        }
+    }
+
+    public void withdraw(int amount) {
+        try {
+            int newBalance = this.getBalanceInternally() - amount;
+
+            // delay deliberately added to magnify the data-corruption and make it easy to see
+            Thread.sleep(5);
+
+           this.overwriteBalance(newBalance);
+        } catch (InterruptedException exception) {
+            exception.printStackTrace();
         }
     }
 }
